@@ -1,34 +1,60 @@
+# =====================================================
+# docker-compose.yml - Base de Datos MySQL
+# Instancia: eva2-data (IP privada: 10.0.136.132)
+# =====================================================
+
+version: "3.8"
+
 services:
-  # ── Servicio de Base de Datos MySQL ──────────────────────────
   database:
-    image: mysql:8.0
-    container_name: proyecto_mysql
-    restart: unless-stopped
-
-    # ── Variables de entorno para inicializar la BD ────────────
+    image: mysql:8.0 # imagen oficial, no requiere Dockerfile propio
+    container_name: eva2-database
+    ports:
+      - "3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: proyecto_db
-      MYSQL_USER: appuser
-      MYSQL_PASSWORD: apppassword
-
-    # ── Persistencia + script de inicialización ────────────────
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-proyecto_db}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-      # Guarda los datos aunque el contenedor se elimine
+      # ── Inicialización (bind mount) ───────────────────────────────────────
+      # Los archivos .sql se montan en initdb.d y MySQL los ejecuta
+      # automáticamente en orden alfabético SOLO la primera vez que arranca
+      # (cuando /var/lib/mysql está vacío).
+      # Se usa bind mount aquí porque son archivos de solo lectura del host
+      # que no necesitan persistencia gestionada por Docker.
+      - ./01_creacion_base_datos.sql:/docker-entrypoint-initdb.d/01_creacion_base_datos.sql:ro
+      - ./02_backup_y_mantenimiento.sql:/docker-entrypoint-initdb.d/02_backup_y_mantenimiento.sql:ro
+
+      # ── Persistencia de datos (named volume) ─────────────────────────────
+      # Se elige named volume (NO bind mount) para /var/lib/mysql porque:
+      # a) Docker gestiona los permisos internos de MySQL correctamente
+      # b) Bind mounts en /var/lib/mysql pueden causar conflictos de permisos
+      # c) Los datos sobreviven a docker-compose down (solo se borran con -v)
       - mysql_data:/var/lib/mysql
 
-      # Script que se ejecuta SOLO la primera vez
-      - ./01_creacion_base_datos.sql:/docker-entrypoint-initdb.d/init.sql
-
-    # ── Red compartida para comunicación con backend ───────────
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
-      - innovatech-net
+      - db-net
 
-# ── Red externa (debe existir previamente) ─────────────────────
-networks:
-  innovatech-net:
-    external: true
-
-# ── Volumen para persistencia de datos ─────────────────────────
 volumes:
   mysql_data:
+    driver: local
+
+networks:
+  db-net:
+    driver: bridge
