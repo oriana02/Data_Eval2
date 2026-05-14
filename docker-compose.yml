@@ -1,38 +1,29 @@
-# =====================================================
-# docker-compose.yml - Base de Datos MySQL
-# Instancia: eva2-data (IP privada: 10.0.136.132)
-# =====================================================
-
-version: "3.8"
-
 services:
-  database:
-    image: mysql:8.0 # imagen oficial, no requiere Dockerfile propio
-    container_name: eva2-database
-    ports:
-      - "3306:3306"
-    environment:
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-proyecto_db}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-    volumes:
-      # ── Inicialización (bind mount) ───────────────────────────────────────
-      # Los archivos .sql se montan en initdb.d y MySQL los ejecuta
-      # automáticamente en orden alfabético SOLO la primera vez que arranca
-      # (cuando /var/lib/mysql está vacío).
-      # Se usa bind mount aquí porque son archivos de solo lectura del host
-      # que no necesitan persistencia gestionada por Docker.
-      - ./01_creacion_base_datos.sql:/docker-entrypoint-initdb.d/01_creacion_base_datos.sql:ro
-      - ./02_backup_y_mantenimiento.sql:/docker-entrypoint-initdb.d/02_backup_y_mantenimiento.sql:ro
-
-      # ── Persistencia de datos (named volume) ─────────────────────────────
-      # Se elige named volume (NO bind mount) para /var/lib/mysql porque:
-      # a) Docker gestiona los permisos internos de MySQL correctamente
-      # b) Bind mounts en /var/lib/mysql pueden causar conflictos de permisos
-      # c) Los datos sobreviven a docker-compose down (solo se borran con -v)
-      - mysql_data:/var/lib/mysql
-
+  # ── BASE DE DATOS (standalone para pruebas locales) ────────
+  # En producción la BD la levanta Back_EVAL2.
+  # Este compose sirve para probar los scripts SQL de forma aislada.
+  db:
+    image: mysql:8.0
+    container_name: proyecto_db_local
     restart: unless-stopped
+
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./01_creacion_base_datos.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+
+    ports:
+      # Expone 3306 al host para conectar con MySQL Workbench
+      - "3306:3306"
+
+    networks:
+      - db_local_net
+
     healthcheck:
       test:
         [
@@ -42,19 +33,18 @@ services:
           "-h",
           "localhost",
           "-u",
-          "root",
+          "${DB_USER}",
+          "-p${DB_PASSWORD}",
         ]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
       start_period: 30s
-    networks:
-      - db-net
 
 volumes:
-  mysql_data:
+  db_data:
     driver: local
 
 networks:
-  db-net:
+  db_local_net:
     driver: bridge
